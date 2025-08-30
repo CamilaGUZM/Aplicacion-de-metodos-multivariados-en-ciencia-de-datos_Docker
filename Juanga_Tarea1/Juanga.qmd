@@ -1,0 +1,307 @@
+---
+title: "Tarea Juanga"
+author: "Sarah Camila Guzmán Fierro"
+format:
+   html:
+     toc: true
+     html-math-method: katex
+     embed-resources: true
+     self-contained-math: true
+     df-print: kable
+editor: visual
+---
+
+# Carga los datos y prepara las matrices de datos para realizar el análisis.
+
+Abrimos los datos
+
+```{python}
+import pandas as pd
+import numpy as np
+
+data = pd.read_csv("../Juanga_Tarea1/bank_notes.csv")
+
+```
+
+Vemos cómo vienen registrados
+
+```{python}
+data.head()
+```
+
+## Exploración inicial
+
+```{python}
+data.info()
+```
+
+```{python}
+data["type"].nunique()
+```
+
+## Separando los datos en target y evidencia
+```{python}
+Xdf = data.drop(columns = ["type"])
+Y = data["type"]
+```
+
+# Calcula la matriz de correlación sobre todos los datos, es decir, toma la muestra de los billetes reales y sospechosos.
+
+Medida de seguridad para solo usar numéricos. 
+
+```{python}
+num = Xdf.select_dtypes(include="number")
+
+corr = num.corr(method="pearson")
+corr
+```
+
+Aplicamos un filtro sencillo para observar cuales tienen mayor coeficiente.
+
+```{python}
+umbralCorr = corr[(corr.abs() >= 0.7) & (corr != 1.0)]
+umbralCorr
+```
+
+Solo se muestra esta correlación fuerte entre las variables `left` y `right` de 0.74, de forma simétrica. Asumiendo que esto se debe a qué tan centrado está (ya sea las faxiones o la figura principal), tiene sentido que estén altamente relacionadas. Esto podría llegar a ser insignificante ya que usualmente se trata de tener un margen similar. SIN EMBARGO, si se referencia a qué tan centradas estan las facciones del rostro, esto nos puede llegar a indicar que el rostro está volteando hacia un lado en específico. No obstante, no nos da mucha información en cuanto a el tipo de billete.
+
+#  Utiliza la función GenericUnivariateSelect() de sklearn.feature_selection en conjunto con la función pearsonr() del módulo stats de scipy para seleccionar 6 variables usando el coeficiente de correlación de Pearson y el p-value asociado a la prueba de hipótesis cuya hipótesis nula establece que las dos variables no están correlacionadas (es decir, que su correlación poblacional es cero).
+
+Descargar la librería.
+
+```{python}
+from sklearn.feature_selection import GenericUnivariateSelect
+from scipy.stats import pearsonr
+```
+
+Cambiamos a arreglos los datos para que puedan ser utilizando como argumentos.
+
+```{python}
+X = Xdf.to_numpy(dtype=float)
+
+```
+
+
+Codificamos el target `type` y lo cambiamos a arreglo.
+
+```{python}
+from sklearn.preprocessing import LabelEncoder
+
+le = LabelEncoder()
+y_encoded = le.fit_transform(Y)
+y_encoded
+```
+
+```{python}
+y = np.asarray(y_encoded, dtype=float)
+```
+
+
+---
+
+**Definición de la función**
+Se define la función que acepta los datos y el target. Crea listas de los scores y p-valores y regresa estos como arreglos para poder filtrar los 6 de interés.
+
+```{python}
+def pearson_eval(X, target):
+    scores = []
+    pvals = []
+    for j in range(X.shape[1]):
+        r, p = pearsonr(X[:, j], y)
+        scores.append(-p)   # usamos -p porque menor p = mejor
+        pvals.append(p)
+    return np.array(scores), np.array(pvals)
+```
+
+```{python}
+gus = GenericUnivariateSelect(score_func=pearson_eval, mode='k_best', param=6)
+gus.fit(X, y_encoded)
+```
+
+```{python}
+# ChatGPTazo para un print bonito
+mask = gus.get_support()
+selected_cols = Xdf.columns[mask]
+
+X_best = Xdf[selected_cols]
+best_scores = gus.scores_[mask]
+best_pvals  = gus.pvalues_[mask]
+```
+
+```{python}
+print("Variables seleccionadas:", list(X_best))
+print("Scores (=-pval):", best_scores)
+print("P-values:", best_pvals)
+```
+
+Podemos observar que `lenght`, `left`, `right`, `bottom`, `top`, `diag` son las que más se relacionan con el tipo de billete, con p-valores muy bajos; siendo `diag` la del p-valor más bajo.
+
+## Con base en la selección de variables que realizaste en el ejercicio anterior, lleva a cabo una prueba de hipótesis para verificar si los billetes falsos difieren de los verdaderos en sus características. ¿Cuál es la conclusión de la prueba en el contexto de los datos?
+
+
+```{python}
+from scipy.stats import ttest_ind
+
+```
+
+Dividir en reales y falsos
+```{python}
+reales = X_best[y_encoded == 0]
+suspects = X_best[y_encoded == 1]
+results = {}
+```
+
+Checamos si sus medias son iguales mediante el t-test
+
+```{python}
+for col in X_best.columns:
+    stat, pval = ttest_ind(reales[col], suspects[col], equal_var=False) #se usa welch's t-test el cual asume varianzas no iguales (a lo que entendí)
+    results[col] = pval
+```
+
+
+Extracto de otro código para print bonito de los resultados:
+```{python}
+for col, pval in results.items():
+    print(f"{col}: p-value = {pval:.4f}")
+```
+
+Siendo la hipótesis nula que los datos de los billetes falsos no difieren de los verdaderos, los p-valores de las seis variables seleccionadas son sumamente pequeños, por lo que se rechaza esta hipótesis, es decir _No hay suficiente evidencia para proponer que los billetes falsos son iguales a los verdaderos_. Esto tiene sentido, esperamos sean diferenciables los falsos de los reales.
+
+
+# Utiliza las variables que has seleccionado y el vector de medias muestral de los billetes reales como media hipotética para llevar a cabo una prueba T^{2} de Hotelling sobre la muestra de billetes sospechosos. ¿El resultado es consistente con lo que obtuviste anteriormente?
+
+```{python}
+from scipy import stats
+```
+
+Función tomada de ejercicios anteriores
+```{python}
+
+def HotellingsT2Test(X, Y):
+    '''Realiza la prueba T2 de Hotelling para dos muestras
+
+       Parámetros
+       ----------
+       X: pd.DataFrame
+           Matriz de datos de la primera población
+       Y: pd.DataFrame
+           Matriz de datos de la segunda población
+
+       Output
+       ------
+       statistic: float
+           Valor de la estadística de prueba
+       p-value: float
+           P-value resultante
+    '''
+
+    ## Encontramos los tamaños de
+    ## muestra y el número de variables
+    n, p = X.shape
+    m = Y.shape[0]
+
+    ## Calculamos la diferencia de medias
+    ## muestrales, las matrices de covarianza
+    ## y la matriz de covarianza agrupada
+    delta = (X.mean(axis = 0) - Y.mean(axis = 0)).values
+    Sx = X.cov()
+    Sy =Y.cov()
+    S_pooled = ((n-1)*Sx + (m-1)*Sy) /(n+m-2)
+
+    ## Calculamos la estadística de prueba
+    t2 = (n*m/(n+m))*delta@ np.linalg.inv(S_pooled)@ delta
+    statistic = (n+m-p-1)/(p*(n+m - 2))*t2
+
+    ## Calculamos el p-value
+    p_value = 1-stats.f.cdf(statistic, p, n + m - p-1)
+
+    ## Imprimimos el resultado
+    print(f"Estadística de prueba: {statistic}\nGrados de libertad: {p}, {n + m - p - 1}\np-value: {p_value}")
+
+    return statistic, p_value
+```
+ 
+ Implementamos
+
+```{python}
+HotellingsT2Test(reales, suspects)
+```
+
+Podemos hacer una aseveración que se puede distinguir los billetes falsos de los reales dadas las 6 medias propuestas dado el p-valor pequeñísimo. Esto concuerda con lo anteriormente obtenido.
+
+
+#  Elabora un profile plot para determinar qué variables se encuentran por arriba o por debajo del valor medio hipotético.
+
+```{python}
+from plotnine import ggplot, aes, geom_pointrange, geom_hline, labs, theme_bw, theme, element_text, ggsave
+```
+```{python}
+def bonferroni(X, alpha=0.05, ref_means=None):
+    '''Calcula intervalos de confianza simultáneos con corrección de Bonferroni
+
+       Parámetros
+       ----------
+       X: pd.DataFrame
+           Matriz de datos
+       alpha: float
+           Nivel de significancia
+
+       Output
+       ------
+       res: pd.DataFrame
+           Data frame con los nombres de las variables, sus medias muestrales y los límites inferior y superior del intervalo de confianza con corrección de Bonferroni
+    '''
+    n, p = X.shape
+    cols = X.columns
+
+    mm = X.mean(axis=0)
+    ss = X.var(axis=0)
+
+    tt = stats.t.ppf(1 - alpha/(2*p), n-1)
+
+    lower = mm - tt * np.sqrt(ss/n)
+    upper = mm + tt * np.sqrt(ss/n)
+
+    res = pd.DataFrame({"variable": cols,
+                        "mean": mm,
+                        "lower": lower,
+                        "upper": upper})
+
+    # Si se pasa ref_means, ajustamos todo relativo a esas medias
+    if ref_means is not None:
+        res["mean"] = res["mean"] - ref_means.values
+        res["lower"] = res["lower"] - ref_means.values
+        res["upper"] = res["upper"] - ref_means.values
+
+    return res
+```
+
+
+```{python}
+variables = ['length', 'left', 'right', 'bottom', 'top', 'diag']
+medias_reales = reales[variables].mean()
+bf_sus_rel = bonferroni(suspects[variables], ref_means=medias_reales)
+
+```
+
+```{python}
+p = (ggplot(bf_sus_rel, aes(x="variable", y="mean")) +
+     geom_pointrange(aes(ymin="lower", ymax="upper"), color="dodgerblue") +
+     geom_hline(yintercept=0, linetype="dashed", color="gray") +
+     labs(x="", y="Diferencia respecto a media de reales", title="Profile plot - Sospechosos vs Reales") +
+     theme_bw() +
+     theme(plot_title=element_text(ha="center", weight="bold", margin={"b":5}),
+           axis_title_x=element_text(weight="bold"),
+           axis_title_y=element_text(weight="bold", rotation=90),
+           axis_text_x=element_text(size=12, weight="bold")))
+p
+
+```
+
+Podemos ver, comparando los sospechosos contra las medias hipotéticas propuestas (las reales), que los grandes diferenciadores son las medidas de abajo, arriba y la diagonal. Esto es contrastante con el primer análisis, que podría tener sentido al separar los datos por sus categorias y de ahí comparar sus medias; en vez de hacerlo con todos los datos agrupados. 
+
+
+#  Con base en todos los resultados que has obtenido, ¿cuál crees que sea la característica más relevante de un billete que ayude a detectar un billete falso?
+
+En base a los resultados obtenidos, creo la variable `diag` es la más importante ya que tuvo un p-valor menor en la prueba del t-test, así como ser un gran diferenciador en el profile plot entre las medias de los falsos sobre las medias de los auténticos. Por consiguiente, sería la parte inferior del billete.
