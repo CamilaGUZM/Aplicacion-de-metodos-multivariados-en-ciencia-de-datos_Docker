@@ -1,0 +1,389 @@
+---
+title: "Tarea PCA"
+author: "Sarah Camila Guzmán Fierro"
+format:
+   html:
+     toc: true
+     html-math-method: katex
+     embed-resources: true
+     self-contained-math: true
+     df-print: kable
+editor: visual
+---
+
+# Ejercicio Previo En Clase, Descomponiendo las imágenes
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+```
+
+```{python}
+folder = "figures/miaus"
+```
+
+```{python}
+#asegurar que todo esté del misma dimension
+height = 64
+width = 64
+```
+
+```{python}
+images = np.empty(shape = (4, height, width), dtype = "float") #esto es el tensor vacío
+```
+
+```{python}
+import cv2
+```
+
+```{python}
+for i in range (1, 5): #tope depende de cantidad imagenes
+	img_path = os.path.join(folder, "miau" + str(i) + ".jpeg") #crea ruta, tiene que estar bien
+	img = cv2.imread(img_path)
+	image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #error aquí es que no encontró el nombre
+	resized_image = cv2.resize(image, (width, height))
+	images[i -1, :,:] = resized_image
+
+```
+
+```{python}
+images.shape
+```
+
+```{python}
+plt.figure(figsize = (8, 8))
+for i in range(4):
+    plt.subplot(2, 2, i + 1)
+    plt.title("Miaus " + str(i + 1))
+    plt.imshow(images[i], cmap = "gray")
+    plt.axis("off")
+```
+
+```{python}
+X = images.reshape(images.shape[0], -1)
+```
+
+```{python}
+X.shape
+```
+
+```{python}
+X_bar = X.mean(axis = 0)
+```
+
+```{python}
+S = np.cov(X.T) #se transpone; debería de ser de 64x64, 64x64
+S.shape
+```
+
+```{python}
+#- Encontramos los eigenvalores y eigenvectores de SS usando la función `eig()` del submódulo `linalg` de `numpy`.
+
+Lambda, Q = np.linalg.eig(S) #lambda matriz eigen valor, Q matriz eigen vector (es la gamma); esto es insostenible computacionalmente
+```
+
+```{python}
+# returns the **indices that would sort `Lambda` in ascending order**.
+# `[::-1]` → reverses the order → **descending order** (largest eigenvalue first)
+
+idx = Lambda.argsort()[::-1] #los corchetes revierten el orden al que necesitamos
+```
+
+```{python}
+# Reorder the eigenvalues according to `idx`:
+Lambda = Lambda[idx] #ordenar lambda
+```
+
+```{python}
+# Reorder **columns of Q** to match the sorted eigenvalues
+Q = Q[:,idx] #se necesitan ordenar las columnas
+
+```
+
+```{python}
+#Formar matriz E
+(Lambda/Lambda.sum()).cumsum() 
+Lambda.shape
+```
+
+#proporcion varianza explicada de la componente i: lambda_i/ sum\_{j=1}\^{P} Lambda_j ; va iterando hasta dar el 80%, si no, suma la siguiente componente #2do comp: suma de 1era y segunda y así #j es variabilidad compleja, los eigenvalores estan definidos sobre el polinomio característico, entonces la solución puede ser compleja, el valor es muy pequeño por complejidad numérica #depende del caso cuantas agarramos
+
+```{python}
+#Paso 4
+q = 3
+E = Q[:, :q] #agarramos top 3 componentes que explican el 80%
+E
+```
+
+```{python}
+plt.figure(figsize = (10, 10))
+for i in range(3):
+    eigenface = E[:, i].reshape(64, 64).astype("float")
+    plt.subplot(1, 3, i + 1)
+    plt.title("EigenMiaus" + str(i + 1))
+    plt.imshow(eigenface, cmap = "gray")
+    plt.axis("off")
+plt.show();
+```
+
+```{python}
+X-X_bar #se necesita trsponer
+y = E.T @ (X-X_bar).T #se reduce a R3; es la que se utiliza para clusters, análisis o modelos. y_i es la que alimenta el siguiente paso, PCA ayuda a identificar anomalías
+y.shape
+```
+
+```{python}
+X_bar.shape
+```
+
+```{python}
+#paso 6, tratar de regresar al espacio original
+
+(E @ y).shape
+X_hat = E @ y + X_bar.reshape(-1, 1) #x sale con solo una dim, se debe hacer un reshape
+```
+
+```{python}
+plt.figure(figsize = (8, 8))
+for i in range(4):
+    eigenface = X_hat[:, i].reshape(64, 64).astype("float")
+    plt.subplot(2, 2, i + 1)
+    plt.title("Miaus reconstruida " + str(i + 1))
+    plt.imshow(eigenface, cmap = "gray")
+    plt.axis("off")
+plt.show();
+```
+
+```{python}
+#basado en num imágenes, num q. 
+(4-1)*Lambda[4:].sum()
+```
+
+------------------------------------------------------------------------
+
+```{python}
+#en teoría deberían de ser positivos al Ser S semidefinida positiva, pero hay parte imaginaria dado el polinomio característico e incluso complejidad numérica
+Lambda = np.real(Lambda)
+```
+
+```{python}
+len(Lambda)
+```
+
+## Scree plot
+
+Los voy a dividir en un plot con solo 20 PCs porque muchas de las compoentes tienen variabilidad cerca a cero y lo hacen ver feo
+
+```{python}
+# Valores de componentes principales (1, 2, 3, ...)
+PC_values = np.arange(1, (len(Lambda) + 1))
+PC_values
+```
+
+```{python}
+# Varianza explicada por cada componente
+explained_var = Lambda / Lambda.sum()
+g1 = 20
+explained_var.shape
+```
+
+```{python}
+
+# Plot del scree plot
+plt.figure(figsize=(8, 5))
+plt.plot(PC_values[:g1], explained_var[:g1], "o-", linewidth=2, color="dodgerblue")
+plt.title("Scree Plot - EigenMiaus Top 20")
+plt.xlabel("Componente Principal")
+plt.ylabel("Varianza Explicada")
+plt.xticks(np.arange(1, g1 + 1, 1))  #esto pa ajustar ejes
+plt.grid(True, linestyle="--", alpha=0.6)
+plt.show()
+
+```
+
+------------------------------------------------------------------------
+
+# Tarea
+
+## Parte 1: PCA
+
+```{python}
+import time
+from sklearn.decomposition import PCA
+```
+
+```{python}
+X = images.reshape(images.shape[0], -1)
+X_bar = X.mean(axis = 0)
+```
+
+```{python}
+s1 = time.time()
+S = np.cov(X)
+sigma1 = PCA(n_components = None, svd_solver = "full")
+sigma1_fit = sigma1.fit(S.T)
+
+timeCOV2=(time.time() - s1)
+```
+
+```{python}
+print(round(timeCOV2, 3), "seconds")
+```
+
+```{python}
+S.shape
+```
+
+```{python}
+sigma1_fit.n_components_
+```
+
+```{python}
+# Plot del scree plot
+PC_values = np.arange(sigma1.n_components_) + 1
+plt.figure(figsize=(8, 5))
+plt.plot(PC_values, sigma1.explained_variance_ratio_, "o-", linewidth=2, color="dodgerblue")
+plt.title("Scree Plot - EigenMiaus")
+plt.xlabel("Componente Principal")
+plt.ylabel("Varianza Explicada")
+plt.grid(True, linestyle="--", alpha=0.6)
+plt.show()
+```
+
+Nos quedamos con las primeras dos componentes ya que es donde el codo está más marcado \### Reconstrucción
+
+```{python}
+loadings = sigma1_fit.components_[:2, :]
+```
+
+```{python}
+E = loadings
+E
+```
+
+```{python}
+y = E @ (X-X_bar)
+```
+
+```{python}
+(E.T @ y).shape
+X_hat1 = E.T @ y + X_bar
+X_hat1.shape
+```
+
+```{python}
+plt.figure(figsize = (8, 8))
+for i in range(4):
+    eigenface = X_hat1.T[:, i].reshape(64, 64).astype("float")
+    plt.subplot(2, 2, i + 1)
+    plt.title("Miaus reconstruida " + str(i + 1))
+    plt.imshow(eigenface, cmap = "gray")
+    plt.axis("off")
+plt.show();
+```
+
+```{python}
+#basado en num imágenes, num q. 
+(4-1)*sigma1_fit.components_[3:].sum()
+```
+
+------------------------------------------------------------------------
+
+## Parte 3: SVD
+
+```{python}
+s2 = time.time()
+S2 = np.cov(X.T)
+sigma2 = PCA(n_components = None, svd_solver = "full")
+sigma2_fit = sigma2.fit(S2)
+
+timeCOV=(time.time() - s2)
+```
+
+```{python}
+print(round(timeCOV, 3), "seconds")
+```
+
+```{python}
+S2.shape
+```
+
+```{python}
+sigma2_fit.n_components_
+```
+
+```{python}
+# Plot del scree plot
+PC_values2 = np.arange(sigma2.n_components_) + 1
+plt.figure(figsize=(8, 5))
+plt.plot(PC_values, sigma2.explained_variance_ratio_, "o-", linewidth=2, color="dodgerblue")
+plt.title("Scree Plot - EigenMiaus")
+plt.xlabel("Componente Principal")
+plt.ylabel("Varianza Explicada")
+plt.grid(True, linestyle="--", alpha=0.6)
+plt.show()
+```
+
+hacerlo bonito
+
+```{python}
+# Plot del scree plot
+PC_values2 = np.arange(sigma2.n_components_ + 1)
+n = 20
+plt.figure(figsize=(8, 5))
+plt.plot(PC_values2[:n], sigma2.explained_variance_ratio_[:n], "o-", linewidth=2, color="dodgerblue")
+plt.title("Scree Plot - EigenMiaus Top 20")
+plt.xlabel("Componente Principal")
+plt.ylabel("Varianza Explicada")
+plt.xticks(np.arange(1, n + 1, 1)) #esto pa ajustar ejes
+plt.grid(True, linestyle="--", alpha=0.6)
+plt.show()
+```
+
+Las primeras tres componentes son las que parten el codo, por lo que sólo se considerarán estas.
+
+### Parte 4: Reconstrucción
+
+```{python}
+loadings2 = sigma2_fit.components_[:3, :]
+```
+
+```{python}
+sigma2_fit.components_
+```
+
+```{python}
+E = loadings2
+E
+```
+
+```{python}
+y = E @ (X-X_bar).T
+```
+
+```{python}
+(E.T @ y).shape
+X_hat2 = E.T @ y + X_bar.reshape(-1, 1)
+X_hat2.shape
+```
+
+```{python}
+plt.figure(figsize = (8, 8))
+for i in range(4):
+    eigenface = X_hat2[:, i].reshape(64, 64).astype("float")
+    plt.subplot(2, 2, i + 1)
+    plt.title("Miaus reconstruida " + str(i + 1))
+    plt.imshow(eigenface, cmap = "gray")
+    plt.axis("off")
+plt.show();
+```
+
+```{python}
+#basado en num imágenes, num q. 
+(4-1)*sigma2_fit.components_[4:].sum()
+```
+
+------------------------------------------------------------------------
+
+Se puede contemplar que sin hacer el SVD de la matriz transpuesta, solo se proponen cuatro componentes, las cuales no representan en su enteridad a la matriz X de las imágenes. Al invertir la matriz, obtenemos todos los eigenvectores, eigenvalores y componentes respectivos a la matriz observada. Podemos ver a su vez que la restauración mediante la matriz transpuesta es más fiel al original y pierde menos información.
